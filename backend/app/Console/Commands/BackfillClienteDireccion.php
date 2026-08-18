@@ -28,7 +28,10 @@ class BackfillClienteDireccion extends Command
         $unmatched = [];
 
         foreach ($rows as $r) {
-            $nombre = trim($r['nombre'] ?? '');
+            // Collapse repeated whitespace: the rescued export has some names with
+            // double spaces (blank Apellido Paterno/Materno columns left an extra gap)
+            // that don't literal-match the single-spaced names already in clientes.
+            $nombre = trim(preg_replace('/\s+/', ' ', $r['nombre'] ?? ''));
             if ($nombre === '') {
                 continue;
             }
@@ -38,7 +41,7 @@ class BackfillClienteDireccion extends Command
 
             // Some nombres are legitimately duplicated in the real data — update every
             // matching row, not just the first, so re-running this command stays idempotent.
-            $clientes = Cliente::where('nombre', $nombre)->get();
+            $clientes = Cliente::whereRaw("TRIM(REGEXP_REPLACE(nombre, '\\\\s+', ' ')) = ?", [$nombre])->get();
             if ($clientes->isEmpty()) {
                 $unmatched[] = $nombre;
                 continue;
