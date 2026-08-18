@@ -1,0 +1,41 @@
+# Secrets / environment
+.env
+.env.backup
+.env.production
+
+# Real production data (client uploads, not source code)
+/storage/
+/shared-media/
+backend/database/seed-data/
+backend/database/database.sqlite
+
+# Leftover debug artifacts (real captured session cookie / CSRF token)
+clone_cookies.txt
+clone_login.html
+
+# Raw recovery artifacts (scraped/exported from the original lost hosting).
+# Not part of the running app — Docker only ever builds ./backend and
+# ./whatsapp-bot. backend/public/ has its own clean copies of these assets,
+# and backend/resources/views/*.blade.php has the real templates. Some of
+# these still carry real embedded session tokens / client data, so they stay
+# out of the repo entirely (kept on the recovery server for reference only).
+/*.html
+/css/
+/js/
+/jspdv/
+/dist/
+/plugins/
+/toast/
+/favico/
+/clientes/
+/garantia/
+/mi-local/
+/productos/
+/logo-fd3.jpeg
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/

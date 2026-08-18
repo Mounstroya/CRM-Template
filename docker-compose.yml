@@ -1,0 +1,88 @@
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${DB_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # No DB_*/SESSION_* overrides here on purpose: all real runtime config lives in
+    # backend/.env (baked into the image). Docker-level env vars here would be
+    # inherited by every `docker compose exec` process too (tinker, artisan test,
+    # migrate) and, being real OS env vars, silently take precedence over
+    # .env/.env.testing (phpdotenv never overrides an already-set env var) — that's
+    # exactly what caused `php artisan test` to run against the real MySQL database
+    # instead of the isolated sqlite testing connection despite phpunit.xml/.env.testing
+    # both saying sqlite. Keep this section empty; edit backend/.env instead.
+    ports:
+      - "8080:8000"
+    volumes:
+      - ./backend/public/storage:/app/public/storage
+      - ./shared-media/productos:/app/public/storage/productos
+      - ./shared-media/_incoming:/app/shared-media-incoming:ro
+
+  whatsapp-bot:
+    build:
+      context: ./whatsapp-bot
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 5000
+      TZ: America/Mexico_City
+      CATALOG_BASE_URL: http://localhost:2900
+      SESSION_SECRET: ${WHATSAPP_SESSION_SECRET}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_DATABASE: ${DB_DATABASE}
+      PRODUCT_PHOTOS_DIR: /app/shared-media/productos
+    volumes:
+      - whatsapp_bot_data:/app/data
+      - ./shared-media/productos:/app/shared-media/productos
+    ports:
+      - "2900:5000"
+
+  phpmyadmin:
+    image: phpmyadmin:5
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      PMA_HOST: db
+      PMA_USER: root
+      PMA_PASSWORD: ${DB_ROOT_PASSWORD}
+    ports:
+      - "8082:80"
+
+volumes:
+  db_data:
+  whatsapp_bot_data:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 10.90.20.0/24
+

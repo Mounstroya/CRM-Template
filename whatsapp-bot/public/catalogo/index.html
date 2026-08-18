@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Catálogo</title>
+<link rel="stylesheet" href="/shared/styles.css" />
+<style>
+  body { min-height: 100vh; }
+  .center-screen {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px;
+    position: relative; overflow: hidden;
+    background-color: var(--color-neutral-900);
+    background-image: radial-gradient(circle, color-mix(in srgb, var(--color-accent) 55%, transparent) 1.6px, transparent 1.6px);
+    background-size: 22px 22px;
+    background-position: -5px -5px;
+  }
+  .center-screen::after {
+    content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background: radial-gradient(ellipse 70% 55% at 50% 38%, transparent 0%, var(--color-neutral-900) 78%);
+  }
+  .center-screen > * { position: relative; z-index: 1; }
+  .auth-card { background: var(--color-surface); padding: 32px 26px; width: 100%; max-width: 380px; box-shadow: var(--shadow-lg); border-radius: var(--radius-lg); }
+  .auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+  .auth-brand-icon { width: 40px; height: 40px; flex-shrink: 0; background: var(--color-accent); border-radius: var(--radius-sm); overflow: hidden; }
+  .auth-brand-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .auth-brand-name { font-family: var(--font-heading); font-weight: 800; font-size: 16px; color: var(--color-text); }
+  .topbar { position: sticky; top: 0; z-index: 10; background: var(--color-neutral-900); color: var(--color-bg); padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; }
+  .content { padding: 16px 16px 100px; max-width: 640px; margin: 0 auto; }
+  .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .cart-bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--color-neutral-900); color: var(--color-bg); padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: var(--shadow-lg); }
+  .hidden { display: none !important; }
+  .error-text { color: var(--color-accent-700); font-size: 13px; margin-top: 8px; }
+  .qty-row { display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--color-divider); padding: 6px 10px; }
+  .qty-btn { width: 24px; height: 24px; border: 1px solid var(--color-divider); font: inherit; font-weight: 800; color: var(--color-accent); background: transparent; appearance: none; padding: 0; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .discount-badge { position: absolute; top: -8px; right: -8px; width: 46px; height: 46px; z-index: 2; }
+  .discount-badge::before, .discount-badge::after {
+    content: ''; position: absolute; inset: 0; background: #e2231a; border-radius: 8px;
+  }
+  .discount-badge::before { transform: rotate(20deg); }
+  .discount-badge::after { transform: rotate(-20deg); }
+  .discount-badge span {
+    position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 800; font-size: 11px; text-align: center; line-height: 1.1;
+  }
+</style>
+</head>
+<body>
+
+<div id="loading" class="center-screen"><div class="text-muted">Cargando...</div></div>
+
+<div id="invalid-view" class="center-screen hidden">
+  <div class="auth-card" style="text-align:center;">
+    <div class="auth-brand" id="invalid-brand" style="justify-content:center;"></div>
+    <h3 id="invalid-title">Link inválido</h3>
+    <div class="text-muted" id="invalid-sub" style="font-size:13.5px;">Este enlace no es válido o ya expiró. Escríbenos por WhatsApp para obtener uno nuevo.</div>
+    <button type="button" class="btn btn-primary" id="invalid-retry" style="margin-top:14px;" hidden>Reintentar</button>
+  </div>
+</div>
+
+<div id="auth-view" class="center-screen hidden">
+  <div class="auth-card">
+    <div class="auth-brand" id="auth-brand"></div>
+    <h3 id="auth-title" style="margin:0 0 4px;"></h3>
+    <div class="text-muted" id="auth-sub" style="font-size:13px;margin-bottom:20px;"></div>
+    <form id="auth-form">
+      <div class="field" style="margin-bottom:18px;">
+        <label id="auth-label"></label>
+        <input class="input" name="password" type="password" required minlength="6" />
+      </div>
+      <button class="btn btn-primary btn-block" type="submit" style="justify-content:center;">Continuar</button>
+    </form>
+    <div id="auth-error" class="error-text"></div>
+    <div id="auth-forgot" class="hidden" style="font-size:12.5px;margin-top:14px;">
+      <button type="button" id="auth-forgot-link" style="color:var(--color-accent);font-weight:700;background:none;border:none;padding:0;font-family:inherit;font-size:inherit;cursor:pointer;">¿Olvidaste tu contraseña?</button>
+      <div id="auth-forgot-sent" class="text-muted hidden" style="margin-top:6px;">Listo, ya avisamos a tu asesor. Se pondrá en contacto contigo para ayudarte a entrar de nuevo.</div>
+    </div>
+  </div>
+</div>
+
+<div id="catalog-view" class="hidden">
+  <div class="topbar">
+    <div style="font-weight:800;" id="catalog-topbar-title">Catálogo</div>
+    <button type="button" id="cart-link" style="font-size:13px;display:flex;align-items:center;gap:6px;background:none;border:none;color:inherit;font-family:inherit;padding:0;cursor:pointer;"><span id="cart-icon"></span> <span id="cart-count-badge"></span></button>
+  </div>
+  <div class="content">
+    <div class="field" style="margin-bottom:12px;">
+      <input class="input" id="catalog-search" type="search" placeholder="Buscar producto..." />
+    </div>
+    <div class="seg" style="overflow-x:auto;margin-bottom:16px;" id="category-chips"></div>
+    <div class="product-grid" id="product-grid"></div>
+    <div id="catalog-pager"></div>
+  </div>
+  <div class="cart-bar hidden" id="cart-bar">
+    <div id="cart-summary" style="font-size:13px;font-weight:700;"></div>
+    <button class="btn btn-primary" id="go-to-cart">Ver pedido →</button>
+  </div>
+</div>
+
+<div id="cart-view" class="hidden">
+  <div class="topbar">
+    <button type="button" id="cart-back" style="background:none;border:none;color:inherit;font-family:inherit;font-size:inherit;padding:0;cursor:pointer;">← Volver</button>
+    <div style="font-weight:800;">Tu pedido</div>
+    <div></div>
+  </div>
+  <div class="content" id="cart-content"></div>
+</div>
+
+<div id="confirm-view" class="center-screen hidden">
+  <div class="auth-card" style="text-align:center;">
+    <h3 id="confirm-title"></h3>
+    <div class="text-muted" style="font-size:13.5px;margin-bottom:20px;">El pedido ya está registrado. Un vendedor se pondrá en contacto para confirmar.</div>
+    <button class="btn btn-primary btn-block" style="justify-content:center;" id="confirm-continue">Seguir comprando</button>
+  </div>
+</div>
+
+<div id="dialog-root"></div>
+
+<script src="/shared/icons.js"></script>
+<script src="/catalogo/app.js"></script>
+</body>
+</html>

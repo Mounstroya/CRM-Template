@@ -1,0 +1,117 @@
+{
+  "config": {
+    "configFile": "/work/playwright.config.js",
+    "rootDir": "/work",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 15000
+    },
+    "quiet": false,
+    "projects": [
+      {
+        "outputDir": "/work/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {},
+        "id": "",
+        "name": "",
+        "testDir": "/work",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "shard": null,
+    "updateSnapshots": "missing",
+    "version": "1.48.0",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "discover.spec.js",
+      "file": "discover.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "discovery: console errors per page",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 180000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "status": "passed",
+                  "duration": 39691,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "DISCOVERY_REPORT_START\n"
+                    },
+                    {
+                      "text": "{\n  \"/mi-local\": {\n    \"status\": 200,\n    \"errors\": []\n  },\n  \"/cartera-de-clientes\": {\n    \"status\": 200,\n    \"errors\": []\n  },\n  \"/cartera-de-usuarios\": {\n    \"status\": 200,\n    \"errors\": []\n  },\n  \"/creditos\": {\n    \"status\": 200,\n    \"errors\": []\n  },\n  \"/historico\": {\n    \"status\": 200,\n    \"errors\": []\n  },\n  \"/depositos\": {\n    \"status\": 200,\n    \"errors\": []\n  },\n  \"/depositos-consulta\": {\n    \"status\": 200,\n    \"errors\": []\n  },\n  \"/garantia\": {\n    \"status\": 200,\n    \"errors\": []\n  },\n  \"/garantia-atender\": {\n    \"status\": 200,\n    \"errors\": []\n  },\n  \"/auditoria\": {\n    \"status\": 200,\n    \"errors\": [\n      \"Access to XMLHttpRequest at 'http://cdn.datatables.net/plug-ins/9dcbecd42ad/i18n/Spanish.json' from origin 'http://localhost:8080' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: Redirect is not allowed for a preflight request.\",\n      \"Failed to load resource: net::ERR_FAILED\"\n    ]\n  },\n  \"/caja-registradora\": {\n    \"status\": 200,\n    \"errors\": []\n  },\n  \"/mi-local/productos\": {\n    \"status\": 200,\n    \"errors\": [\n      \"Access to XMLHttpRequest at 'http://cdn.datatables.net/plug-ins/9dcbecd42ad/i18n/Spanish.json' from origin 'http://localhost:8080' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: Redirect is not allowed for a preflight request.\",\n      \"Failed to load resource: net::ERR_FAILED\"\n    ]\n  },\n  \"/punto-de-venta\": {\n    \"status\": 200,\n    \"errors\": []\n  },\n  \"/configuracion\": {\n    \"status\": 200,\n    \"errors\": []\n  },\n  \"/whatsapp\": {\n    \"status\": 200,\n    \"errors\": []\n  }\n}\n"
+                    },
+                    {
+                      "text": "DISCOVERY_REPORT_END\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-08-18T06:34:06.353Z",
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "34d0c2441335c8bcf41a-d036c603d28d1723e293",
+          "file": "discover.spec.js",
+          "line": 14,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-08-18T06:34:05.748Z",
+    "duration": 40747.86,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}
