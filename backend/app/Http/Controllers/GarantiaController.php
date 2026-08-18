@@ -41,6 +41,7 @@ class GarantiaController extends Controller
     {
         $garantia = Garantia::findOrFail($id);
         $garantia->status = 'Finalizado';
+        $garantia->tipo_resolucion = 'cambio';
         $garantia->save();
 
         return response()->json(['ok' => true, 'garantia' => $garantia]);
@@ -82,6 +83,7 @@ class GarantiaController extends Controller
         ]);
 
         $garantia->status = 'Finalizado';
+        $garantia->tipo_resolucion = 'nota_credito';
         $garantia->save();
 
         return response()->json(['ok' => true, 'garantia' => $garantia, 'venta' => $venta]);

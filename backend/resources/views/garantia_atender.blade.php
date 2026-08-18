@@ -654,7 +654,7 @@
       fetch('/usuarios/update-password', {
         method: 'POST',
         headers: {
-          'X-CSRF-TOKEN': 'TnncInpaEGGbJzbpT4sqwEzlwJ0CeKyE3iyGXLeA'
+          'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
         },
         body: formData
       })
@@ -892,6 +892,15 @@
                             </thead>
                             <tbody>
                                     @foreach($garantias as $g)
+                                    @php
+                                        $productoMatch = $productos->first(fn($p) => trim($p->descripcion) === trim($g->producto));
+                                        $esResuelta = in_array($g->status, ['Resuelto', 'Finalizado'], true);
+                                        $solucionTexto = match ($g->tipo_resolucion) {
+                                            'cambio' => 'Cambio de producto',
+                                            'nota_credito' => 'Nota de crédito',
+                                            default => 'No capturado en la recuperación',
+                                        };
+                                    @endphp
                                     <tr>
                                         <td>{{ $g->registro }}</td>
                                         <td>{{ $g->abierto_por }}</td>
@@ -907,11 +916,17 @@
                                             @endif
                                         </td>
                                         <td>
-                                            @if($g->status === 'Solicitud de garantía')
-                                                @php $productoMatch = $productos->first(fn($p) => trim($p->descripcion) === trim($g->producto)); @endphp
-                                                <button type="button" class="btn btn-sm btn-warning" data-toggle="modal" data-target="#lastPurchaseModal" data-id="{{ $g->id }}" data-cliente="{{ $g->cliente_id }}" data-producto="{{ $productoMatch->id ?? '' }}">Ver Última Compra</button>
+                                            @if($esResuelta)
+                                                <button type="button" class="btn btn-sm btn-info" data-toggle="modal" data-target="#summaryModal" data-id="{{ $g->id }}" data-producto="{{ $g->producto }}" data-cliente="{{ $g->cliente }}" data-motivo="{{ $g->motivo }}" data-solucion="{{ $solucionTexto }}" data-total="">Ver Resumen</button>
+                                            @else
+                                                @if($g->status === 'Solicitud de garantía')
+                                                    <button type="button" class="btn btn-sm btn-warning" data-toggle="modal" data-target="#lastPurchaseModal" data-id="{{ $g->id }}" data-cliente="{{ $g->cliente_id }}" data-producto="{{ $productoMatch->id ?? '' }}">Ver Última Compra</button>
+                                                @endif
+                                                @if($g->status === 'Aprobada')
+                                                    <button type="button" class="btn btn-sm btn-success" data-toggle="modal" data-target="#actionModal" data-id="{{ $g->id }}" data-cliente="{{ $g->cliente_id }}" data-producto="{{ $productoMatch->id ?? '' }}">Resolver Garantía</button>
+                                                @endif
+                                                <button type="button" class="btn btn-sm btn-primary" data-toggle="modal" data-target="#statusModal" data-id="{{ $g->id }}" data-status="1">Cambiar Estatus</button>
                                             @endif
-                                            <button type="button" class="btn btn-sm btn-primary" data-toggle="modal" data-target="#statusModal" data-id="{{ $g->id }}" data-status="1">Cambiar Estatus</button>
                                         </td>
                                     </tr>
                                     @endforeach
@@ -984,7 +999,7 @@
 <div class="modal fade" id="actionModal" tabindex="-1" role="dialog" aria-labelledby="actionModalLabel" aria-hidden="true">
     <div class="modal-dialog" role="document">
         <div class="modal-content">
-            <form id="actionForm" action="/garantia-action" method="POST">
+            <form id="actionForm" method="POST">
                 <input type="hidden" name="_token" value="{{ csrf_token() }}">                <div class="modal-header">
                     <h5 class="modal-title" id="actionModalLabel">Acción</h5>
                     <button type="button" class="close" data-dismiss="modal" aria-label="Close">
@@ -993,6 +1008,7 @@
                 </div>
                 <div class="modal-body">
                     <input type="hidden" name="garantia_id" id="action_garantia_id">
+                    <input type="hidden" name="producto" id="action_producto">
                     <div class="form-group">
                         <label for="action">Seleccione una acción</label>
                         <select class="form-control" id="action" name="action">
@@ -1136,12 +1152,55 @@
 		<script>
     $('#menu_garantia_atender').attr('class', 'nav-link active');
     
-    $('#statusForm').on('submit', function() {
-        $(this).find('button[type="submit"]').prop('disabled', true);
+    $('#statusForm').on('submit', function(e) {
+        e.preventDefault();
+        var form = this;
+        $(form).find('button[type="submit"]').prop('disabled', true);
+        fetch('/garantia-update-status', {
+            method: 'POST',
+            body: new FormData(form)
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                location.reload();
+            } else {
+                alert('No se pudo actualizar el estatus.');
+                $(form).find('button[type="submit"]').prop('disabled', false);
+            }
+        })
+        .catch(function() {
+            alert('No se pudo actualizar el estatus.');
+            $(form).find('button[type="submit"]').prop('disabled', false);
+        });
     });
 
-    $('#actionForm').on('submit', function() {
-        $(this).find('button[type="submit"]').prop('disabled', true);
+    $('#actionForm').on('submit', function(e) {
+        e.preventDefault();
+        var form = this;
+        var garantiaId = $('#action_garantia_id').val();
+        var accion = $('#action').val();
+        var url = accion === 'nota_credito'
+            ? '/garantia/usar-nota-credito/' + garantiaId
+            : '/garantia/cambiar-producto/' + garantiaId;
+        $(form).find('button[type="submit"]').prop('disabled', true);
+        fetch(url, {
+            method: 'POST',
+            body: new FormData(form)
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                location.reload();
+            } else {
+                alert(data.message || 'No se pudo resolver la garantía.');
+                $(form).find('button[type="submit"]').prop('disabled', false);
+            }
+        })
+        .catch(function() {
+            alert('No se pudo resolver la garantía.');
+            $(form).find('button[type="submit"]').prop('disabled', false);
+        });
     });
 
     $('#statusModal').on('show.bs.modal', function(event) {
@@ -1195,6 +1254,7 @@
         var cliente = button.data('cliente');
         var modal = $(this);
         modal.find('#action_garantia_id').val(garantiaId);
+        modal.find('#action_producto').val(producto);
         modal.find('#validateExistence').data('producto', producto);
         modal.find('#action').data('cliente', cliente);
     });
@@ -1224,7 +1284,7 @@
             url: '/garantia/lastPurchase',
             method: 'POST',
             data: {
-                _token: 'TnncInpaEGGbJzbpT4sqwEzlwJ0CeKyE3iyGXLeA',
+                _token: $('meta[name="csrf-token"]').attr('content'),
                 cliente_id: clienteId,
                 producto_id: productoId
             },
@@ -1252,7 +1312,7 @@
                 url: '/productos-get-price',
                 method: 'POST',
                 data: {
-                    _token: 'TnncInpaEGGbJzbpT4sqwEzlwJ0CeKyE3iyGXLeA',
+                    _token: $('meta[name="csrf-token"]').attr('content'),
                     producto: producto,
                     cliente: cliente
                 },
@@ -1272,7 +1332,7 @@
             url: '/productos-validate-existence',
             method: 'POST',
             data: {
-                _token: 'TnncInpaEGGbJzbpT4sqwEzlwJ0CeKyE3iyGXLeA',
+                _token: $('meta[name="csrf-token"]').attr('content'),
                 producto: producto
             },
             success: function(response) {

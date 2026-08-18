@@ -861,7 +861,7 @@
       fetch('/usuarios/update-password', {
         method: 'POST',
         headers: {
-          'X-CSRF-TOKEN': 'TnncInpaEGGbJzbpT4sqwEzlwJ0CeKyE3iyGXLeA'
+          'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
         },
         body: formData
       })

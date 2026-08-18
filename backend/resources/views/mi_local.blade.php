@@ -654,7 +654,7 @@
       fetch('/usuarios/update-password', {
         method: 'POST',
         headers: {
-          'X-CSRF-TOKEN': 'TnncInpaEGGbJzbpT4sqwEzlwJ0CeKyE3iyGXLeA'
+          'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
         },
         body: formData
       })
@@ -1161,7 +1161,7 @@
 		var Data = new FormData(this);
 		Data.append('role', 'Vendedor');
 		Data.append('status_local', '2');
-		Data.append('_token', 'TnncInpaEGGbJzbpT4sqwEzlwJ0CeKyE3iyGXLeA');
+		Data.append('_token', $('meta[name="csrf-token"]').attr('content'));
 		$.ajax({
 			method: 'POST',
 			url: "/form_solicitud_pv",
@@ -1197,7 +1197,7 @@
 	$('#form_baja_local').on('submit', function(e) {
 		e.preventDefault();
 		var Data = new FormData(this);
-		Data.append('_token', 'TnncInpaEGGbJzbpT4sqwEzlwJ0CeKyE3iyGXLeA');
+		Data.append('_token', $('meta[name="csrf-token"]').attr('content'));
 		$.ajax({
 			method: 'POST',
 			url: "/local_baja",

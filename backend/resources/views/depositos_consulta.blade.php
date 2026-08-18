@@ -654,7 +654,7 @@
       fetch('/usuarios/update-password', {
         method: 'POST',
         headers: {
-          'X-CSRF-TOKEN': 'TnncInpaEGGbJzbpT4sqwEzlwJ0CeKyE3iyGXLeA'
+          'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
         },
         body: formData
       })
@@ -1016,7 +1016,7 @@
                 url: '/depositos/consultaPorFecha',
                 method: 'POST',
                 data: {
-                    _token: 'TnncInpaEGGbJzbpT4sqwEzlwJ0CeKyE3iyGXLeA',
+                    _token: $('meta[name="csrf-token"]').attr('content'),
                     fecha: fecha
                 },
                 success: function(response) {
@@ -1049,7 +1049,7 @@
                 url: '/ventas/consultaPorFecha',
                 method: 'POST',
                 data: {
-                    _token: 'TnncInpaEGGbJzbpT4sqwEzlwJ0CeKyE3iyGXLeA',
+                    _token: $('meta[name="csrf-token"]').attr('content'),
                     fecha: fecha,
                     asesorId: asesorId
                 },
