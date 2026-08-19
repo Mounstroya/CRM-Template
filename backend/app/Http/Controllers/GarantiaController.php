@@ -99,30 +99,45 @@ class GarantiaController extends Controller
      * clear message when there's genuinely no purchase on record, same as the real
      * system would for a client who never bought that product.
      */
+    /**
+     * Real bug fixed: matched producto_vendido items by numeric id, but that id was
+     * copied verbatim from the ORIGINAL site's own product numbering during the
+     * historical scrape — completely unrelated to this clone's own auto-increment
+     * producto ids (confirmed: item id 152 in a real venta pointed at an unrelated
+     * Bodega product here). Matching by descripcion instead — stable across both id
+     * spaces and already the pattern used elsewhere in this controller/garantia views
+     * (productoMatch by trimmed descripcion).
+     */
     public function lastPurchase(Request $request)
     {
         $clienteId = (int) $request->input('cliente_id');
         $productoId = (int) $request->input('producto_id');
+        $producto = Producto::find($productoId);
+        $descripcion = trim($producto?->descripcion ?? '');
 
         $venta = Venta::where('cliente_id', $clienteId)
             ->orderByDesc('fecha_compra')
             ->get()
-            ->first(function ($v) use ($productoId) {
-                return collect($v->producto_vendido ?? [])->contains(fn ($item) => (int) $item['id'] === $productoId);
+            ->first(function ($v) use ($descripcion) {
+                return collect($v->producto_vendido ?? [])->contains(fn ($item) => trim($item['nombre'] ?? '') === $descripcion);
             });
 
         if (! $venta) {
             return response()->json(['error' => 'No se encontró una compra previa de este producto para este cliente.'], 404);
         }
 
-        $item = collect($venta->producto_vendido)->first(fn ($i) => (int) $i['id'] === $productoId);
+        $item = collect($venta->producto_vendido)->first(fn ($i) => trim($i['nombre'] ?? '') === $descripcion);
         $cliente = Cliente::find($clienteId);
-        $producto = Producto::find($productoId);
 
         return response()->json([
             'cliente' => $cliente?->nombre,
             'producto' => $producto?->descripcion ?? ($item['nombre'] ?? null),
-            'fecha' => optional($venta->fecha_compra)->format('Y-m-d H:i:s'),
+            // Real bug fixed: `fecha_compra` isn't cast to a datetime on the Venta
+            // model (kept a plain string on purpose — VentaController/historico's
+            // JSON output and CSV export depend on that exact raw DB format), so
+            // optional(...)->format() always silently returned null here. It's
+            // already stored as "Y-m-d H:i:s", so just pass it through.
+            'fecha' => $venta->fecha_compra,
             'cantidad' => $item['cantidad'] ?? null,
             'precio' => $producto?->precio_1,
         ]);

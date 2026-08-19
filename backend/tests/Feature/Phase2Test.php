@@ -8,6 +8,7 @@ use App\Models\Credito;
 use App\Models\Garantia;
 use App\Models\Producto;
 use App\Models\User;
+use App\Models\Venta;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -136,6 +137,40 @@ class Phase2Test extends TestCase
 
         $resp->assertStatus(200);
         $this->assertDatabaseHas('garantias', ['id' => $g->id, 'status' => 'Aprobada']);
+    }
+
+    /**
+     * Real bug fixed: matched producto_vendido items by numeric id, but that id is
+     * whatever the ORIGINAL site's own scrape captured — unrelated to this clone's
+     * own auto-increment producto ids (confirmed live: a real venta's item id
+     * happened to collide with a completely different producto here). Also
+     * `optional($venta->fecha_compra)->format(...)` always silently returned null
+     * since fecha_compra isn't cast to a datetime on the Venta model.
+     */
+    public function test_garantia_last_purchase_matches_by_descripcion_not_id(): void
+    {
+        $user = $this->admin();
+        $cliente = Cliente::create(['nombre' => 'RAMIRO PEREZ', 'status' => 'Activo']);
+        // id deliberately does NOT match any producto_vendido item id below.
+        $producto = Producto::create(['clave' => 'GAR148', 'descripcion' => 'GAR148 POWERBANK CON CABLES', 'precio_1' => 176, 'stock' => 10, 'status' => 1]);
+        Venta::create([
+            'cliente_id' => $cliente->id,
+            'fecha_compra' => '2026-08-15 11:38:02',
+            'total' => 352,
+            'producto_vendido' => [['id' => 999999, 'nombre' => 'GAR148 POWERBANK CON CABLES', 'cantidad' => '2.00']],
+        ]);
+
+        $resp = $this->actingAs($user)->post('/garantia/lastPurchase', [
+            'cliente_id' => $cliente->id,
+            'producto_id' => $producto->id,
+        ]);
+
+        $resp->assertStatus(200)->assertJson([
+            'cliente' => 'RAMIRO PEREZ',
+            'producto' => 'GAR148 POWERBANK CON CABLES',
+            'fecha' => '2026-08-15 11:38:02',
+            'cantidad' => '2.00',
+        ]);
     }
 
     public function test_caja_apertura_y_cierre(): void
