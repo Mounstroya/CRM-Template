@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Auditoria;
 use App\Models\AuditoriaConteo;
+use App\Models\AuditoriaEvento;
 use App\Models\Producto;
+use App\Models\Traspaso;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -12,26 +14,34 @@ use Illuminate\Support\Facades\Auth;
 /**
  * Real routes recovered from the live site's app-auditoria.js (untouched, still
  * loaded as-is): the /auditoria page's #tblLocales is a client-side DataTable fed by
- * these AJAX endpoints, not server-rendered — restored that mechanism here instead of
- * the Fase 3 server-side Blade loop, since it drives the real 3-state GENERAR/
- * CONTINUAR button logic this JS already implements correctly.
+ * these AJAX endpoints, not server-rendered.
+ *
+ * `Auditoria` = locales/sucursales themselves (unchanged meaning). `AuditoriaEvento`
+ * = one real audit EVENT for a local — the real site tracks many of these per local
+ * over time (confirmed live: Bodega Principal alone has 10 historical audits), so
+ * this replaced an earlier "own design" pass that only ever tracked one
+ * ultima_auditoria_* set of columns directly on `Auditoria`.
  */
 class AuditoriaController extends Controller
 {
     public function getLocalesAuditoria()
     {
-        $sucursales = Auditoria::all()->map(function ($a) {
+        $ultimas = AuditoriaEvento::orderByDesc('fecha_inicio')->get()->groupBy('local_id');
+
+        $sucursales = Auditoria::all()->map(function ($a) use ($ultimas) {
+            $ultima = $ultimas->get($a->id)?->first();
+
             return [
                 'id' => $a->id,
                 'parent_id' => $a->parent_id,
                 'nombre' => $a->nombre,
                 'status' => $a->status,
-                'ultima_auditoria' => $a->ultima_auditoria_id ? [
-                    'id' => $a->ultima_auditoria_id,
+                'ultima_auditoria' => $ultima ? [
+                    'id' => $ultima->id,
                     'local_id' => $a->id,
-                    'fecha_inicio' => $a->ultima_auditoria_inicio,
-                    'fecha_fin' => $a->ultima_auditoria_fin,
-                    'no_auditoria' => $a->ultima_auditoria_no,
+                    'fecha_inicio' => $ultima->fecha_inicio,
+                    'fecha_fin' => $ultima->fecha_fin,
+                    'no_auditoria' => $ultima->no_auditoria,
                 ] : null,
             ];
         });
@@ -39,83 +49,62 @@ class AuditoriaController extends Controller
         return response()->json(['sucursales' => $sucursales]);
     }
 
-    /**
-     * Real route: POST /autidoria/nueva-auditoria (field: id = sucursal id). Starts a
-     * new in-progress audit (fecha_fin null → real JS shows "CONTINUAR" for it, which
-     * links to AuditoriaController::show below — the real checklist/counting process).
-     * Assumption: no_auditoria increments from the highest seen so far.
-     */
+    /** Real route: POST /autidoria/nueva-auditoria (field: id = sucursal id). Starts a new AuditoriaEvento. */
     public function nuevaAuditoria(Request $request)
     {
         $sucursal = Auditoria::findOrFail($request->input('id'));
 
-        $maxNo = (int) Auditoria::max('ultima_auditoria_no');
-        $sucursal->ultima_auditoria_id = (int) (Auditoria::max('ultima_auditoria_id') ?? 0) + 1;
-        $sucursal->ultima_auditoria_no = (string) ($maxNo + 1);
-        $sucursal->ultima_auditoria_inicio = now();
-        $sucursal->ultima_auditoria_fin = null;
-        $sucursal->save();
+        $maxNo = (int) AuditoriaEvento::max('no_auditoria');
+        $evento = AuditoriaEvento::create([
+            'local_id' => $sucursal->id,
+            'no_auditoria' => (string) ($maxNo + 1),
+            'auditor_nombre' => Auth::user()->name,
+            'fecha_inicio' => now(),
+            'fecha_fin' => null,
+        ]);
 
-        return response()->json(['ok' => true, 'sucursal' => $sucursal]);
+        return response()->json(['ok' => true, 'sucursal' => $sucursal, 'evento' => $evento]);
     }
 
-    /** Real route: POST /auditoria/fechas-auditoria-local (field: id = sucursal id). */
+    /** Real route: POST /auditoria/fechas-auditoria-local (field: id = sucursal id). Full real history, not just the latest. */
     public function fechasAuditoriaLocal(Request $request)
     {
-        $sucursal = Auditoria::findOrFail($request->input('id'));
-        $fechas = $sucursal->ultima_auditoria_inicio
-            ? [['id' => $sucursal->ultima_auditoria_id, 'fecha' => optional($sucursal->ultima_auditoria_inicio)->format('Y-m-d')]]
-            : [];
+        $eventos = AuditoriaEvento::where('local_id', $request->input('id'))
+            ->orderByDesc('fecha_inicio')
+            ->get(['id', 'fecha_inicio', 'fecha_fin']);
 
-        return response()->json($fechas);
+        return response()->json(['auditorias' => $eventos]);
     }
 
-    /**
-     * Own design, documented in the 2026_08_18_000004 migration: the real
-     * auditoria/{id}/show "toma de auditoría" page could not be checked against the still-
-     * live original this pass (needs the real production login, unavailable in this
-     * session). This implements the plainly-implied need — count every active product's
-     * real stock and compare it against the system's stock — using this project's own
-     * conventions.
-     *
-     * Real evidence (js/app-auditoria.js's #tblLocales DataTable column render, confirmed
-     * via a Playwright click-through that 404'd on the first attempt): the GENERAR/
-     * CONTINUAR/VER ÚLTIMA links use href="auditoria/{ultima_auditoria.id}/show" — the
-     * `data:"ultima_auditoria"` column's own nested `.id`, i.e. our ultima_auditoria_id
-     * counter — NOT the sucursal's own primary id. $id here must resolve against
-     * ultima_auditoria_id, not Auditoria::find($id).
-     */
+    /** $id here is the AuditoriaEvento's own id (see class docblock). */
     public function show($id)
     {
-        $sucursal = Auditoria::where('ultima_auditoria_id', $id)->firstOrFail();
-        $productos = Producto::where('status', 1)->orderBy('descripcion')->get();
+        $evento = AuditoriaEvento::findOrFail($id);
+        $sucursal = Auditoria::findOrFail($evento->local_id);
+        $productos = Producto::where('locales_id', $evento->local_id)->where('status', 1)->orderBy('descripcion')->get();
 
-        $conteos = AuditoriaConteo::where('auditoria_id', $sucursal->id)
-            ->where('no_auditoria', $sucursal->ultima_auditoria_no)
-            ->get()
-            ->keyBy('producto_id');
+        $conteos = AuditoriaConteo::where('auditoria_id', $evento->id)->get()->keyBy('producto_id');
 
         return view('auditoria_show', [
             'sucursal' => $sucursal,
+            'evento' => $evento,
             'productos' => $productos,
             'conteos' => $conteos,
         ]);
     }
 
-    /** Own design: saves/updates one product's counted stock for the in-progress audit. $id = ultima_auditoria_id, see show() above. */
+    /** Saves/updates one product's counted stock for the in-progress AuditoriaEvento. */
     public function guardarConteo(Request $request, $id)
     {
-        $sucursal = Auditoria::where('ultima_auditoria_id', $id)->firstOrFail();
+        $evento = AuditoriaEvento::findOrFail($id);
         $producto = Producto::findOrFail($request->input('producto_id'));
         $stockContado = (int) $request->input('stock_contado');
 
         $conteo = AuditoriaConteo::updateOrCreate(
+            ['auditoria_id' => $evento->id, 'producto_id' => $producto->id],
             [
-                'auditoria_id' => $sucursal->id,
-                'no_auditoria' => $sucursal->ultima_auditoria_no,
-                'producto_id' => $producto->id,
-            ],
-            [
+                'no_auditoria' => $evento->no_auditoria,
+                'clave' => $producto->clave,
                 'stock_sistema' => $producto->stock,
                 'stock_contado' => $stockContado,
                 'diferencia' => $stockContado - (int) $producto->stock,
@@ -126,56 +115,49 @@ class AuditoriaController extends Controller
         return response()->json(['ok' => true, 'conteo' => $conteo]);
     }
 
-    /** Own design: closes the in-progress audit (sets ultima_auditoria_fin), same GENERAR/CONTINUAR state machine the real /auditoria listing already reads. $id = ultima_auditoria_id, see show() above. */
+    /** Closes the in-progress AuditoriaEvento. */
     public function finalizar(Request $request, $id)
     {
-        $sucursal = Auditoria::where('ultima_auditoria_id', $id)->firstOrFail();
-        $sucursal->ultima_auditoria_fin = now();
-        $sucursal->save();
+        $evento = AuditoriaEvento::findOrFail($id);
+        $evento->fecha_fin = now();
+        $evento->save();
 
-        $diferencias = AuditoriaConteo::where('auditoria_id', $sucursal->id)
-            ->where('no_auditoria', $sucursal->ultima_auditoria_no)
+        $diferencias = AuditoriaConteo::where('auditoria_id', $evento->id)
             ->whereNotNull('diferencia')
             ->where('diferencia', '!=', 0)
             ->count();
 
-        return response()->json(['ok' => true, 'message' => 'Auditoría finalizada.', 'diferencias' => $diferencias, 'sucursal' => $sucursal]);
+        return response()->json(['ok' => true, 'message' => 'Auditoría finalizada.', 'diferencias' => $diferencias, 'sucursal' => Auditoria::find($evento->local_id)]);
     }
 
     /**
      * Real route: POST /auditoria/reporte-local-excel (#btnExportarLocalExcel, field id =
-     * local id, plain form POST/download per app-auditoria.js). CSV, same documented
-     * Excel-as-CSV convention as ClienteController::exportExcel.
+     * local id). "Exportar Todas las Auditorías del Local" — spans every AuditoriaEvento
+     * for that local, not just one, per the real sidebar copy ("agrupadas por producto
+     * para detectar anomalías").
      */
     public function reporteLocalExcel(Request $request)
     {
         $sucursal = Auditoria::findOrFail($request->input('id'));
-        $conteos = AuditoriaConteo::with('producto')
-            ->where('auditoria_id', $sucursal->id)
-            ->where('no_auditoria', $sucursal->ultima_auditoria_no)
-            ->get();
+        $eventoIds = AuditoriaEvento::where('local_id', $sucursal->id)->pluck('id');
+        $conteos = AuditoriaConteo::with('producto')->whereIn('auditoria_id', $eventoIds)->get();
 
         return response()->streamDownload(function () use ($conteos) {
             $out = fopen('php://output', 'w');
             fputcsv($out, ['Clave', 'Producto', 'Stock Sistema', 'Stock Contado', 'Diferencia']);
             foreach ($conteos as $c) {
-                fputcsv($out, [$c->producto?->clave, $c->producto?->descripcion, $c->stock_sistema, $c->stock_contado, $c->diferencia]);
+                fputcsv($out, [$c->clave ?? $c->producto?->clave, $c->producto?->descripcion, $c->stock_sistema, $c->stock_contado, $c->diferencia]);
             }
             fclose($out);
         }, 'auditoria-'.$sucursal->id.'.csv', ['Content-Type' => 'text/csv']);
     }
 
-    /**
-     * Real route: POST /auditoria/reporte-local-pdf (#btnExportarLocalPDF, field id =
-     * local id). Real PDF via barryvdh/laravel-dompdf (installed this pass).
-     */
+    /** Real route: POST /auditoria/reporte-local-pdf (#btnExportarLocalPDF, field id = local id). */
     public function reporteLocalPdf(Request $request)
     {
         $sucursal = Auditoria::findOrFail($request->input('id'));
-        $conteos = AuditoriaConteo::with('producto')
-            ->where('auditoria_id', $sucursal->id)
-            ->where('no_auditoria', $sucursal->ultima_auditoria_no)
-            ->get();
+        $eventoIds = AuditoriaEvento::where('local_id', $sucursal->id)->pluck('id');
+        $conteos = AuditoriaConteo::with('producto')->whereIn('auditoria_id', $eventoIds)->get();
 
         $pdf = Pdf::loadView('reportes.auditoria_pdf', [
             'sucursal' => $sucursal,
@@ -183,5 +165,80 @@ class AuditoriaController extends Controller
         ]);
 
         return $pdf->download('auditoria-'.$sucursal->id.'.pdf');
+    }
+
+    /**
+     * Real route: POST /auditoria/reporte-auditoria (field id = AuditoriaEvento id).
+     * Per-event Excel summary — real column set confirmed live (byte-for-byte header
+     * match): LOCAL/AUDITOR/FECHA/CLAVE/PRODUCTO/STOCK INICIAL/ENTRADAS/SALIDAS/
+     * CALCULADO/CONTADO/DIFERENCIA/COSTO VENTA/COMENTARIO.
+     */
+    public function reporteAuditoria(Request $request)
+    {
+        $evento = AuditoriaEvento::findOrFail($request->input('id'));
+        $sucursal = Auditoria::find($evento->local_id);
+        $conteos = AuditoriaConteo::with('producto')->where('auditoria_id', $evento->id)->get();
+
+        return response()->streamDownload(function () use ($evento, $sucursal, $conteos) {
+            $out = fopen('php://output', 'w');
+            fputcsv($out, ['LOCAL', 'AUDITOR', 'FECHA', 'CLAVE', 'PRODUCTO', 'STOCK INICIAL', 'ENTRADAS', 'SALIDAS', 'CALCULADO', 'CONTADO', 'DIFERENCIA', 'COSTO VENTA', 'COMENTARIO']);
+            foreach ($conteos as $c) {
+                fputcsv($out, [
+                    $sucursal?->nombre, $evento->auditor_nombre, $evento->fecha_inicio,
+                    $c->clave ?? $c->producto?->clave, $c->producto?->descripcion,
+                    $c->stock_sistema, $c->entradas, $c->salidas, $c->calculado, $c->stock_contado,
+                    $c->diferencia, $c->costo_venta, $c->comentario,
+                ]);
+            }
+            fclose($out);
+        }, 'reporte-auditoria-'.$evento->id.'.csv', ['Content-Type' => 'text/csv']);
+    }
+
+    /**
+     * Real route: POST /auditoria/reporte-detallado (field id = AuditoriaEvento id,
+     * "Detalle de todas las entradas y salidas"). Real column set confirmed live:
+     * PRODUCTO/TIPO MOVIMIENTO/FECHA/DOCUMENTO/CANTIDAD/PRECIO UNITARIO/TOTAL/
+     * ORIGEN-DESTINO/NOTAS. Documented simplification: this build's traspaso_detalles
+     * don't carry a precio_unitario, so that column is left blank rather than guessed.
+     */
+    public function reporteDetallado(Request $request)
+    {
+        $evento = AuditoriaEvento::findOrFail($request->input('id'));
+        $movimientos = Traspaso::with('detalles.producto')
+            ->where(function ($q) use ($evento) {
+                $q->where('sucursal_origen_id', $evento->local_id)->orWhere('sucursal_destino_id', $evento->local_id);
+            })
+            ->get();
+
+        return response()->streamDownload(function () use ($movimientos, $evento) {
+            $out = fopen('php://output', 'w');
+            fputcsv($out, ['PRODUCTO', 'TIPO MOVIMIENTO', 'FECHA', 'DOCUMENTO', 'CANTIDAD', 'PRECIO UNITARIO', 'TOTAL', 'ORIGEN/DESTINO', 'NOTAS']);
+            foreach ($movimientos as $t) {
+                $tipo = $t->sucursal_origen_id == $evento->local_id ? 'SALIDA' : 'ENTRADA';
+                $otro = $t->sucursal_origen_id == $evento->local_id ? $t->sucursal_destino_id : $t->sucursal_origen_id;
+                foreach ($t->detalles as $d) {
+                    fputcsv($out, [
+                        $d->producto?->descripcion, $tipo, $t->created_at, $t->no_requisicion,
+                        $d->cantidad_recibida ?? $d->cantidad_enviada ?? $d->cantidad_solicitada, null, null, $otro, '',
+                    ]);
+                }
+            }
+            fclose($out);
+        }, 'reporte-detallado-'.$evento->id.'.csv', ['Content-Type' => 'text/csv']);
+    }
+
+    /** Real route: POST /auditoria/reporte/pdf (field id = AuditoriaEvento id). */
+    public function reportePdf(Request $request)
+    {
+        $evento = AuditoriaEvento::findOrFail($request->input('id'));
+        $sucursal = Auditoria::find($evento->local_id);
+        $conteos = AuditoriaConteo::with('producto')->where('auditoria_id', $evento->id)->get();
+
+        $pdf = Pdf::loadView('reportes.auditoria_pdf', [
+            'sucursal' => $sucursal,
+            'conteos' => $conteos,
+        ]);
+
+        return $pdf->download('reporte-auditoria-'.$evento->id.'.pdf');
     }
 }

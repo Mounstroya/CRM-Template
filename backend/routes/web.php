@@ -148,6 +148,9 @@ Route::middleware('auth')->group(function () {
         Route::post('/auditoria/{id}/finalizar', [AuditoriaController::class, 'finalizar']);
         Route::post('/auditoria/reporte-local-excel', [AuditoriaController::class, 'reporteLocalExcel']);
         Route::post('/auditoria/reporte-local-pdf', [AuditoriaController::class, 'reporteLocalPdf']);
+        Route::post('/auditoria/reporte-auditoria', [AuditoriaController::class, 'reporteAuditoria']);
+        Route::post('/auditoria/reporte-detallado', [AuditoriaController::class, 'reporteDetallado']);
+        Route::post('/auditoria/reporte/pdf', [AuditoriaController::class, 'reportePdf']);
 
         // WhatsApp section (Fase 4 fusion) — management console reads/writes real
         // sale-affecting data (confirms pedidos into ventas), kept admin-only like the

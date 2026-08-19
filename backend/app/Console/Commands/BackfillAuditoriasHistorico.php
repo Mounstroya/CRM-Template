@@ -38,11 +38,19 @@ class BackfillAuditoriasHistorico extends Command
                 continue;
             }
 
+            // Real bug fixed: the source `fechas-auditoria-local` scrape never captured
+            // a display "no. X" for each event (only id/fecha_inicio/fecha_fin), so an
+            // earlier pass fell back to the real (large, non-sequential) auditoria_id
+            // as no_auditoria — confirmed wrong against a real example ("Auditoría no.
+            // 2" was really auditoria_id=138). The real numbering is per-local
+            // sequential by fecha_inicio, assigned in the renumbering pass below; keyed
+            // here by fecha_inicio (unique per local in practice) so re-runs stay
+            // idempotent without depending on the number being fixed up first.
             $evento = AuditoriaEvento::firstOrCreate(
-                ['local_id' => $localId, 'no_auditoria' => $ev['no_auditoria'] ?? (string) $ev['auditoria_id']],
+                ['local_id' => $localId, 'fecha_inicio' => $ev['fecha_inicio'] ?: null],
                 [
+                    'no_auditoria' => '0',
                     'auditor_nombre' => $ev['auditor'] ?? null,
-                    'fecha_inicio' => $ev['fecha_inicio'] ?: null,
                     'fecha_fin' => $ev['fecha_fin'] ?: null,
                 ]
             );
@@ -63,7 +71,6 @@ class BackfillAuditoriasHistorico extends Command
 
                 AuditoriaConteo::create([
                     'auditoria_id' => $evento->id,
-                    'no_auditoria' => $ev['no_auditoria'] ?? null,
                     'producto_id' => $productoId,
                     'clave' => $d['clave'],
                     'stock_sistema' => $this->num($d['stock_inicial']) ?? 0,
@@ -76,6 +83,20 @@ class BackfillAuditoriasHistorico extends Command
                     'comentario' => $d['comentario'] ?: null,
                 ]);
                 $conteosCreados++;
+            }
+        }
+
+        // Real "no. X" is per-local sequential by fecha_inicio (verified against a
+        // real example — auditoria_id 138 = ARTURO FLORES CARRANZA's 2nd audit
+        // chronologically = "no. 2" on the live site). Renumber every event for every
+        // local touched, idempotent to re-run.
+        foreach (AuditoriaEvento::select('local_id')->distinct()->pluck('local_id') as $localId) {
+            $ordenados = AuditoriaEvento::where('local_id', $localId)->orderBy('fecha_inicio')->get();
+            foreach ($ordenados as $i => $evt) {
+                $numero = (string) ($i + 1);
+                if ($evt->no_auditoria !== $numero) {
+                    $evt->update(['no_auditoria' => $numero]);
+                }
             }
         }
 

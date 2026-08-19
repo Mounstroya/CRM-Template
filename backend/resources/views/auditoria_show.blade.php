@@ -43,17 +43,32 @@
 				<div class="card">
 					<div class="card-header">
 						<h5 class="card-title" style="font-weight:bold">
-							{{ $sucursal->nombre }} — Auditoría no. {{ $sucursal->ultima_auditoria_no }}
-							@if ($sucursal->ultima_auditoria_fin)
+							{{ $sucursal->nombre }} — Auditoría no. {{ $evento->no_auditoria }}
+							@if ($evento->fecha_fin)
 								<span class="badge badge-success">FINALIZADA</span>
 							@else
 								<span class="badge badge-warning">EN PROCESO</span>
 							@endif
 						</h5>
 						<div class="card-tools">
-							<button type="button" class="btn btn-success" id="btnFinalizarAuditoria" @if($sucursal->ultima_auditoria_fin) disabled @endif>
+							<button type="button" class="btn btn-success" id="btnFinalizarAuditoria" @if($evento->fecha_fin) disabled @endif>
 								<i class="fas fa-check"></i> Finalizar auditoría
 							</button>
+							<form method="post" action="{{ url('/auditoria/reporte-auditoria') }}" style="display:inline-block">
+								<input type="hidden" name="_token" value="{{ csrf_token() }}">
+								<input type="hidden" name="id" value="{{ $evento->id }}">
+								<button class="btn btn-outline-success" type="submit" title="Resumen de auditoría"><i class="fas fa-file-excel"></i> REPORTE EXCEL</button>
+							</form>
+							<form method="post" action="{{ url('/auditoria/reporte-detallado') }}" style="display:inline-block; margin-left:5px;">
+								<input type="hidden" name="_token" value="{{ csrf_token() }}">
+								<input type="hidden" name="id" value="{{ $evento->id }}">
+								<button class="btn btn-success" type="submit" title="Detalle de todas las entradas y salidas"><i class="fas fa-file-excel"></i> REPORTE DETALLADO</button>
+							</form>
+							<form method="post" action="{{ url('/auditoria/reporte/pdf') }}" style="display:inline-block; margin-left:5px;">
+								<input type="hidden" name="_token" value="{{ csrf_token() }}">
+								<input type="hidden" name="id" value="{{ $evento->id }}">
+								<button class="btn btn-default" type="submit" title="Reporte PDF"><i class="fas fa-file-pdf"></i> REPORTE PDF</button>
+							</form>
 						</div>
 					</div>
 					<div class="card-body table-responsive">
@@ -77,7 +92,7 @@
 										<td>
 											<input type="number" class="form-control input-conteo" style="width:120px"
 												value="{{ $conteo->stock_contado ?? '' }}"
-												@if($sucursal->ultima_auditoria_fin) disabled @endif>
+												@if($evento->fecha_fin) disabled @endif>
 										</td>
 										<td class="celda-diferencia">{{ $conteo->diferencia ?? '' }}</td>
 									</tr>
@@ -100,8 +115,8 @@
 <script src="/dist/js/adminlte.js"></script>
 <script src="/toast/javascript/jquery.toastmessage.js"></script>
 <script>
-	var routeGuardarConteo = "{{ url('/auditoria/'.$sucursal->ultima_auditoria_id.'/conteo') }}";
-	var routeFinalizarAuditoria = "{{ url('/auditoria/'.$sucursal->ultima_auditoria_id.'/finalizar') }}";
+	var routeGuardarConteo = "{{ url('/auditoria/'.$evento->id.'/conteo') }}";
+	var routeFinalizarAuditoria = "{{ url('/auditoria/'.$evento->id.'/finalizar') }}";
 	var csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 
 	document.querySelectorAll('.input-conteo').forEach(function (input) {
