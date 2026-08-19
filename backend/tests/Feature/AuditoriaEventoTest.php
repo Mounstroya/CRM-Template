@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Auditoria;
 use App\Models\AuditoriaEvento;
 use App\Models\Producto;
+use App\Models\Traspaso;
 use App\Models\User;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -55,8 +56,9 @@ class AuditoriaEventoTest extends TestCase
 
         $evento = AuditoriaEvento::create(['local_id' => 1, 'no_auditoria' => '1', 'fecha_inicio' => now()]);
 
+        // Real page: products load via AJAX (#tblProductos), not server-rendered.
         $show = $this->actingAs($user)->get("/auditoria/{$evento->id}/show");
-        $show->assertStatus(200)->assertSee('Producto Auditado');
+        $show->assertStatus(200)->assertSee('tblProductos', false);
 
         $guardar = $this->actingAs($user)->post("/auditoria/{$evento->id}/conteo", [
             'producto_id' => $producto->id,
@@ -77,6 +79,45 @@ class AuditoriaEventoTest extends TestCase
         $finalizar->assertStatus(200)->assertJson(['ok' => true, 'diferencias' => 1]);
         $this->assertDatabaseHas('auditoria_eventos', ['id' => $evento->id]);
         $this->assertNotNull($evento->fresh()->fecha_fin);
+    }
+
+    public function test_productos_by_local_and_auditar_flow_matches_by_clave_across_locales(): void
+    {
+        $user = $this->admin(localesId: 1);
+        $bodega = Auditoria::create(['id' => 1, 'nombre' => 'Bodega Test', 'status' => 1]);
+        $vendedorLocal = Auditoria::create(['id' => 2, 'nombre' => 'Vendedor Test', 'status' => 1]);
+        $productoBodega = Producto::create(['locales_id' => 1, 'clave' => 'AUD2', 'descripcion' => 'Producto Movido', 'precio_1' => 50, 'stock' => 100, 'status' => 1]);
+        $productoVendedor = Producto::create(['locales_id' => 2, 'clave' => 'AUD2', 'descripcion' => 'Producto Movido', 'precio_1' => 50, 'stock' => 0, 'status' => 1]);
+
+        // Real traspaso Bodega -> Vendedor, received, so totalRecibidos should reflect
+        // it for the vendedor's local even though the detalle.producto_id points at
+        // the BODEGA's own row (created from that catalog), not the vendedor's.
+        $traspaso = Traspaso::create(['sucursal_origen_id' => 1, 'sucursal_destino_id' => 2, 'status' => 3, 'no_requisicion' => 500]);
+        \App\Models\TraspasoDetalle::create(['traspaso_id' => $traspaso->id, 'producto_id' => $productoBodega->id, 'cantidad_solicitada' => 10, 'cantidad_enviada' => 10, 'cantidad_recibida' => 10]);
+
+        $evento = AuditoriaEvento::create(['local_id' => 2, 'no_auditoria' => '1', 'fecha_inicio' => now()]);
+
+        $lista = $this->actingAs($user)->post('/productos/getProductosByLocalId', ['id' => 2, 'auditado' => false, 'auditoria_id' => $evento->id]);
+        $lista->assertStatus(200)->assertJson(['status' => true]);
+        $this->assertTrue(collect($lista->json('productos'))->contains('id', $productoVendedor->id));
+
+        $auditar = $this->actingAs($user)->post('/auditoria/producto-auditar', [
+            'id' => $productoVendedor->id, 'localId' => 2, 'auditado' => false, 'auditoriaId' => $evento->id,
+        ]);
+        $auditar->assertStatus(200)->assertJson(['totalRecibidos' => 10, 'totalEnviados' => 0]);
+
+        $auditado = $this->actingAs($user)->post('/auditoria/producto-auditado', [
+            'auditoria_id' => $evento->id, 'producto_id' => $productoVendedor->id,
+            'stock' => 0, 'entradas' => 10, 'salidas' => 0, 'calculado' => 10, 'stock_final' => 9, 'diferencia' => -1, 'nota' => 'faltó uno',
+        ]);
+        $auditado->assertStatus(200)->assertJson(['status' => true]);
+        $this->assertDatabaseHas('auditoria_conteos', ['auditoria_id' => $evento->id, 'producto_id' => $productoVendedor->id, 'stock_contado' => 9, 'diferencia' => -1, 'comentario' => 'faltó uno']);
+
+        // Re-fetching with auditado=true should now surface this saved count.
+        $reconsulta = $this->actingAs($user)->post('/auditoria/producto-auditar', [
+            'id' => $productoVendedor->id, 'localId' => 2, 'auditado' => true, 'auditoriaId' => $evento->id,
+        ]);
+        $reconsulta->assertStatus(200)->assertJsonPath('ultimaAuditoriaProducto.stock_final', 9);
     }
 
     public function test_fechas_auditoria_local_returns_full_real_history(): void

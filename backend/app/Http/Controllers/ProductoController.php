@@ -256,4 +256,38 @@ class ProductoController extends Controller
     {
         return response()->json(['status' => true, 'typeMessage' => 'Success', 'message' => 'Catálogo sincronizado.']);
     }
+
+    /**
+     * Real route: POST /productos/getProductosByLocalId (fields id=localId, auditado,
+     * auditoria_id) — feeds auditoria_show's #tblProductos (app-auditoria-local.js,
+     * never rescued during the original recovery, now restored). `ultima_auditoria_producto`
+     * is the most recent AuditoriaConteo for that producto across ANY past event, real
+     * shape confirmed live (id/auditoria_id/stock_final/fecha_auditado).
+     */
+    public function getProductosByLocalId(Request $request)
+    {
+        $localId = (int) $request->input('id');
+        $productos = Producto::with('unidadVenta')->where('locales_id', $localId)->where('status', 1)->orderBy('descripcion')->get();
+
+        $conteos = \App\Models\AuditoriaConteo::whereIn('producto_id', $productos->pluck('id'))
+            ->orderByDesc('id')
+            ->get()
+            ->unique('producto_id')
+            ->keyBy('producto_id');
+
+        $data = $productos->map(function ($p) use ($conteos) {
+            $arr = $p->toArray();
+            $c = $conteos->get($p->id);
+            $arr['ultima_auditoria_producto'] = $c ? [
+                'id' => $c->id,
+                'auditoria_id' => $c->auditoria_id,
+                'stock_final' => $c->stock_contado,
+                'fecha_auditado' => optional($c->updated_at)->format('Y-m-d H:i:s'),
+            ] : null;
+
+            return $arr;
+        });
+
+        return response()->json(['status' => true, 'productos' => $data]);
+    }
 }

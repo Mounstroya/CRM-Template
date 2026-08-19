@@ -144,11 +144,14 @@ class ComprasController extends Controller
         }
 
         $noRequisicion = (int) (Traspaso::max('id') ?? 0) + 1;
+        // Same real bug as TraspasoController::crearSolicitud: sucursal_destino_id was
+        // never set, so a compra could never be attributed to the local that made it.
+        $destinoId = Auth::user()->locales_id ?? 1;
 
-        $pedido = DB::transaction(function () use ($proveedorId, $productos, $noRequisicion, $conPago, $request) {
+        $pedido = DB::transaction(function () use ($proveedorId, $productos, $noRequisicion, $conPago, $request, $destinoId) {
             $pedido = Traspaso::create([
                 'sucursal_origen_id' => null,
-                'sucursal_destino_id' => null,
+                'sucursal_destino_id' => $destinoId,
                 'proveedor_id' => $proveedorId ?: null,
                 'status' => self::SOLICITADO,
                 'users_id' => Auth::id(),

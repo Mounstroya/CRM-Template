@@ -7,6 +7,8 @@ use App\Models\AuditoriaConteo;
 use App\Models\AuditoriaEvento;
 use App\Models\Producto;
 use App\Models\Traspaso;
+use App\Models\TraspasoDetalle;
+use App\Models\Venta;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -240,5 +242,113 @@ class AuditoriaController extends Controller
         ]);
 
         return $pdf->download('reporte-auditoria-'.$evento->id.'.pdf');
+    }
+
+    /**
+     * Real route: POST /auditoria/producto-auditar (fields id=producto id, localId,
+     * auditado, auditoriaId) — feeds the #modalAuditoriaProducto opened per-row from
+     * #tblProductos. Matches movements by `clave` (not producto_id) because each local
+     * has its own independent producto row per clave — a traspaso_detalle's producto_id
+     * refers to whichever local's catalog was used to build that request, not
+     * necessarily this local's own row for the same real-world item.
+     */
+    public function productoAuditar(Request $request)
+    {
+        $producto = Producto::with('unidadVenta')->findOrFail($request->input('id'));
+        $localId = (int) $request->input('localId');
+        $auditado = $request->boolean('auditado');
+        $auditoriaId = (int) $request->input('auditoriaId');
+        $clave = $producto->clave;
+
+        $totalRecibidos = TraspasoDetalle::whereHas('producto', fn ($q) => $q->where('clave', $clave))
+            ->whereHas('traspaso', fn ($q) => $q->whereNull('proveedor_id')->where('sucursal_destino_id', $localId)->where('status', 3))
+            ->sum('cantidad_recibida');
+
+        $totalEnviados = TraspasoDetalle::whereHas('producto', fn ($q) => $q->where('clave', $clave))
+            ->whereHas('traspaso', fn ($q) => $q->where('sucursal_origen_id', $localId)->whereIn('status', [2, 3]))
+            ->sum('cantidad_enviada');
+
+        $totalComprados = TraspasoDetalle::whereHas('producto', fn ($q) => $q->where('clave', $clave))
+            ->whereHas('traspaso', fn ($q) => $q->whereNotNull('proveedor_id')->where('sucursal_destino_id', $localId)->where('status', 3))
+            ->sum('cantidad_comprada');
+
+        // Documented simplification: ventas don't have a real per-local column, only
+        // the `vendedores` JSON array of names captured from the rescued historical
+        // scrape — matched against this local's own nombre. New ventas made through
+        // this clone's own POS carry the seller's real name in that same array.
+        $localNombre = Auditoria::find($localId)?->nombre;
+        $descripcion = trim($producto->descripcion ?? '');
+        $totalVendidos = 0;
+        if ($localNombre) {
+            Venta::where('vendedores', 'like', '%'.$localNombre.'%')->get(['producto_vendido'])->each(function ($v) use (&$totalVendidos, $descripcion) {
+                foreach ($v->producto_vendido ?? [] as $item) {
+                    if (trim($item['nombre'] ?? '') === $descripcion) {
+                        $totalVendidos += (float) ($item['cantidad'] ?? 0);
+                    }
+                }
+            });
+        }
+
+        // stockInicial: the last counted stock for this producto from a previous
+        // finalized audit, if any — otherwise its current live stock as a reasonable
+        // starting point (documented simplification: no separate "opening balance"
+        // ledger exists outside of audit counts themselves).
+        $ultimaAuditoriaProducto = null;
+        $conteoQuery = AuditoriaConteo::where('producto_id', $producto->id)->orderByDesc('id');
+        if ($auditado) {
+            $conteoQuery->where('auditoria_id', $auditoriaId);
+        } else {
+            $conteoQuery->where('auditoria_id', '!=', $auditoriaId);
+        }
+        $ultimoConteo = $conteoQuery->first();
+        $stockInicial = $ultimoConteo->stock_contado ?? $producto->stock;
+
+        if ($auditado && $ultimoConteo) {
+            $ultimaAuditoriaProducto = [
+                'id' => $ultimoConteo->id,
+                'auditoria_id' => $ultimoConteo->auditoria_id,
+                'stock_final' => $ultimoConteo->stock_contado,
+                'nota' => $ultimoConteo->comentario,
+            ];
+        }
+
+        return response()->json([
+            'producto' => $producto,
+            'totalRecibidos' => $totalRecibidos,
+            'totalEnviados' => $totalEnviados,
+            'totalVendidos' => $totalVendidos,
+            'totalComprados' => $totalComprados,
+            'stockInicial' => $stockInicial,
+            'ultimaAuditoriaProducto' => $ultimaAuditoriaProducto,
+        ]);
+    }
+
+    /** Real route: POST /auditoria/producto-auditado — saves one product's count for the current AuditoriaEvento. */
+    public function productoAuditado(Request $request)
+    {
+        $evento = AuditoriaEvento::findOrFail($request->input('auditoria_id'));
+        if ($evento->fecha_fin) {
+            return response()->json(['status' => false]);
+        }
+
+        $producto = Producto::findOrFail($request->input('producto_id'));
+
+        $conteo = AuditoriaConteo::updateOrCreate(
+            ['auditoria_id' => $evento->id, 'producto_id' => $producto->id],
+            [
+                'no_auditoria' => $evento->no_auditoria,
+                'clave' => $producto->clave,
+                'stock_sistema' => (float) $request->input('stock', 0),
+                'entradas' => (float) $request->input('entradas', 0),
+                'salidas' => (float) $request->input('salidas', 0),
+                'calculado' => (float) $request->input('calculado', 0),
+                'stock_contado' => (float) $request->input('stock_final', 0),
+                'diferencia' => (float) $request->input('diferencia', 0),
+                'comentario' => $request->input('nota') ?: null,
+                'users_id' => Auth::id(),
+            ]
+        );
+
+        return response()->json(['status' => true, 'conteo' => $conteo]);
     }
 }

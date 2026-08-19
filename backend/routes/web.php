@@ -73,6 +73,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/getProductosMatriz', [ProductoController::class, 'listAll']);
     Route::post('/mercanciaSinStock', [ProductoController::class, 'sinStock']);
     Route::post('/sincronizar', [ProductoController::class, 'sincronizar']);
+    Route::post('/productos/getProductosByLocalId', [ProductoController::class, 'getProductosByLocalId']);
 
     Route::post('/getCajas', [CajaController::class, 'getCajas']);
     Route::post('/caja_status', [CajaController::class, 'status']);
@@ -151,6 +152,8 @@ Route::middleware('auth')->group(function () {
         Route::post('/auditoria/reporte-auditoria', [AuditoriaController::class, 'reporteAuditoria']);
         Route::post('/auditoria/reporte-detallado', [AuditoriaController::class, 'reporteDetallado']);
         Route::post('/auditoria/reporte/pdf', [AuditoriaController::class, 'reportePdf']);
+        Route::post('/auditoria/producto-auditar', [AuditoriaController::class, 'productoAuditar']);
+        Route::post('/auditoria/producto-auditado', [AuditoriaController::class, 'productoAuditado']);
 
         // WhatsApp section (Fase 4 fusion) — management console reads/writes real
         // sale-affecting data (confirms pedidos into ventas), kept admin-only like the

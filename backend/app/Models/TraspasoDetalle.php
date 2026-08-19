@@ -13,4 +13,9 @@ class TraspasoDetalle extends Model
     {
         return $this->belongsTo(Producto::class, 'producto_id');
     }
+
+    public function traspaso()
+    {
+        return $this->belongsTo(Traspaso::class, 'traspaso_id');
+    }
 }
