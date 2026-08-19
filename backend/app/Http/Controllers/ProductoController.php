@@ -6,9 +6,22 @@ use App\Models\Producto;
 use App\Models\UnidadCompra;
 use App\Models\UnidadVenta;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class ProductoController extends Controller
 {
+    /**
+     * Real system: every local (Bodega Principal + one per vendedor) has its own
+     * independent set of producto rows/stock, confirmed live (same clave, different
+     * id, different stock per local). Every authenticated user belongs to exactly one
+     * locales_id and only ever operates on that local's own catalog — matching the
+     * real site's own window.localId behavior (admin's own session is local 1).
+     */
+    private function localesId(): int
+    {
+        return Auth::user()->locales_id ?? 1;
+    }
+
     public function getPrice(Request $request)
     {
         $producto = Producto::findOrFail($request->input('id'));
@@ -45,7 +58,7 @@ class ProductoController extends Controller
         $length = (int) $request->query('length', 50);
         $searchValue = $request->query('search')['value'] ?? '';
 
-        $base = Producto::with('categoria');
+        $base = Producto::with('categoria')->where('locales_id', $this->localesId());
         $total = (clone $base)->count();
 
         if ($searchValue !== '') {
@@ -150,6 +163,7 @@ class ProductoController extends Controller
         $unidadVenta = $this->syncUnidadVenta($request->input('unidad_venta_id'));
 
         $producto = Producto::create([
+            'locales_id' => $this->localesId(),
             'clave' => strtoupper((string) $request->input('clave')),
             'clave_alterna' => strtoupper((string) $request->input('clave_alterna')),
             'servicio' => $request->boolean('servicio'),
@@ -223,13 +237,13 @@ class ProductoController extends Controller
      * populate select-product pickers (compra builder, traspaso builder). */
     public function listAll()
     {
-        return response()->json(['productos' => Producto::where('status', 1)->orderBy('descripcion')->get()]);
+        return response()->json(['productos' => Producto::where('locales_id', $this->localesId())->where('status', 1)->orderBy('descripcion')->get()]);
     }
 
     /** Real route: POST /mercanciaSinStock — products with stock <= 0, used to bulk-add to a pedido. */
     public function sinStock()
     {
-        return response()->json(['productos' => Producto::where('stock', '<=', 0)->where('status', 1)->orderBy('descripcion')->get()]);
+        return response()->json(['productos' => Producto::where('locales_id', $this->localesId())->where('stock', '<=', 0)->where('status', 1)->orderBy('descripcion')->get()]);
     }
 
     /**

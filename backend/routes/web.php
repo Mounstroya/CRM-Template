@@ -101,6 +101,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/productos.comprar', [ComprasController::class, 'comprar']);
     Route::post('/autorizarCompra', [ComprasController::class, 'autorizarCompra']);
     Route::post('/finalizarCompra', [ComprasController::class, 'finalizarCompra']);
+    Route::post('/getReporteCompras', [ComprasController::class, 'reporteCompras']);
 
     // Requisiciones / traspasos entre sucursales
     Route::post('/getTiendasVinculadas', [TraspasoController::class, 'getTiendasVinculadas']);
@@ -117,6 +118,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/rechazarMovimientoMercanciaDetalles', [TraspasoController::class, 'rechazarMovimientoMercanciaDetalles']);
     Route::post('/eliminarMovimientoMercancia', [TraspasoController::class, 'eliminarMovimientoMercancia']);
     Route::post('/descargarTraspasoPdf', [TraspasoController::class, 'descargarPdf']);
+    Route::post('/getReporteTraspasos', [TraspasoController::class, 'reporteTraspasos']);
 
     // Admin-only screens (Propietario/Encargado): user management, settings, audits,
     // and client create/edit. Assumption documented in RequireFullAccess middleware.

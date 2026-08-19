@@ -12,6 +12,7 @@ backend/database/database.sqlite
 # Leftover debug artifacts (real captured session cookie / CSRF token)
 clone_cookies.txt
 clone_login.html
+cookies.txt
 
 # Raw recovery artifacts (scraped/exported from the original lost hosting).
 # Not part of the running app — Docker only ever builds ./backend and

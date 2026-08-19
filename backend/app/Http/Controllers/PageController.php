@@ -5,9 +5,15 @@ namespace App\Http\Controllers;
 use App\Models\Auditoria;
 use App\Models\Garantia;
 use App\Models\Producto;
+use Illuminate\Support\Facades\Auth;
 
 class PageController extends Controller
 {
+    private function localesId(): int
+    {
+        return Auth::user()->locales_id ?? 1;
+    }
+
     public function miLocal()
     {
         return view('mi_local');
@@ -47,7 +53,7 @@ class PageController extends Controller
     {
         return view('garantia', [
             'garantias' => Garantia::orderByDesc('registro')->get(),
-            'productos' => Producto::where('status', 1)->orderBy('descripcion')->get(),
+            'productos' => Producto::where('locales_id', $this->localesId())->where('status', 1)->orderBy('descripcion')->get(),
         ]);
     }
 
@@ -55,7 +61,7 @@ class PageController extends Controller
     {
         return view('garantia_atender', [
             'garantias' => Garantia::orderByDesc('registro')->get(),
-            'productos' => Producto::where('status', 1)->orderBy('descripcion')->get(),
+            'productos' => Producto::where('locales_id', $this->localesId())->where('status', 1)->orderBy('descripcion')->get(),
         ]);
     }
 
@@ -66,7 +72,7 @@ class PageController extends Controller
 
     public function puntoDeVenta()
     {
-        $productos = Producto::where('status', 1)->get()->map(fn ($p) => [
+        $productos = Producto::where('locales_id', $this->localesId())->where('status', 1)->get()->map(fn ($p) => [
             'id' => $p->id,
             'clave' => $p->clave,
             'descripcion' => $p->descripcion,
@@ -96,6 +102,6 @@ class PageController extends Controller
 
     public function miLocalProductos()
     {
-        return view('mi_local_productos', ['productos' => Producto::orderBy('descripcion')->get()]);
+        return view('mi_local_productos', ['productos' => Producto::where('locales_id', $this->localesId())->orderBy('descripcion')->get()]);
     }
 }

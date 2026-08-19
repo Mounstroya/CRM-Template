@@ -51,10 +51,15 @@ class TraspasoController extends Controller
 
         $noRequisicion = (int) (Traspaso::max('id') ?? 0) + 1;
 
-        $traspaso = DB::transaction(function () use ($sucursalId, $productos, $noRequisicion) {
+        // Real bug fixed here: sucursal_destino_id was never set — nothing to receive
+        // stock at recepción time. The requesting user's own local is the real
+        // destino (they're asking sucursal_origen_id to send THEM stock).
+        $destinoId = Auth::user()->locales_id ?? 1;
+
+        $traspaso = DB::transaction(function () use ($sucursalId, $destinoId, $productos, $noRequisicion) {
             $traspaso = Traspaso::create([
                 'sucursal_origen_id' => $sucursalId,
-                'sucursal_destino_id' => null,
+                'sucursal_destino_id' => $destinoId,
                 'status' => self::SOLICITADO,
                 'users_id' => Auth::id(),
                 'no_requisicion' => $noRequisicion,
@@ -210,6 +215,13 @@ class TraspasoController extends Controller
         return response()->json(['status' => true, 'typeMessage' => 'Success', 'message' => 'Mercancía enviada.', 'requisicion' => $traspaso]);
     }
 
+    /**
+     * Real system: each local keeps its own independent producto row/stock (same
+     * clave, different id per local — confirmed live). `detalle->producto_id` is the
+     * ORIGIN local's row (already decremented on envío) — receiving must credit the
+     * matching clave's row on the DESTINO local, not the same origin row, or stock
+     * would just bounce back to where it started instead of actually moving.
+     */
     public function ingresarMovimientoMercanciaDetalles(Request $request)
     {
         $traspaso = Traspaso::with('detalles')->findOrFail($request->input('id'));
@@ -219,11 +231,26 @@ class TraspasoController extends Controller
 
         DB::transaction(function () use ($traspaso) {
             foreach ($traspaso->detalles as $detalle) {
-                $producto = Producto::find($detalle->producto_id);
+                $productoOrigen = Producto::find($detalle->producto_id);
                 $cantidad = (float) ($detalle->cantidad_enviada ?? $detalle->cantidad_solicitada);
                 $detalle->cantidad_recibida = $cantidad;
                 $detalle->save();
-                $producto?->increment('stock', $cantidad);
+
+                if (! $productoOrigen || ! $traspaso->sucursal_destino_id) {
+                    continue;
+                }
+                $productoDestino = Producto::firstOrCreate(
+                    ['locales_id' => $traspaso->sucursal_destino_id, 'clave' => $productoOrigen->clave],
+                    array_merge(
+                        \Illuminate\Support\Arr::only($productoOrigen->toArray(), [
+                            'clave_alterna', 'descripcion', 'categoria_id', 'unidad_compra_id', 'unidad_venta_id',
+                            'unidad_compra', 'unidad_venta', 'factor', 'precio_compra', 'neto', 'servicio',
+                            'precio_1', 'precio_2', 'precio_3', 'precio_4', 'status',
+                        ]),
+                        ['stock' => 0]
+                    )
+                );
+                $productoDestino->increment('stock', $cantidad);
             }
             $traspaso->status = self::RECIBIDO;
             $traspaso->save();
@@ -264,5 +291,39 @@ class TraspasoController extends Controller
         $traspaso->delete();
 
         return response()->json(['status' => true, 'typeMessage' => 'Success', 'message' => 'Solicitud eliminada.']);
+    }
+
+    /**
+     * Real route recovered from the live site's "Historial de traspasos" modal (form
+     * action="/getReporteTraspasos", fields fecha_inicio/fecha_fin/local) — was declared
+     * in the rescued HTML but never implemented (owner confirmed the button 404s). The
+     * "local" select's real options are user ids (person who created the traspaso), not
+     * sucursal ids — confirmed from the rescued option list ("Seleccione un local" /
+     * "Todos los locales"=0 / then one option per real user) — so it filters by
+     * traspasos.users_id, not by sucursal_origen_id.
+     */
+    public function reporteTraspasos(Request $request)
+    {
+        $query = Traspaso::whereNotNull('sucursal_origen_id')->with('detalles');
+        if ($inicio = $request->input('fecha_inicio')) {
+            $query->whereDate('created_at', '>=', $inicio);
+        }
+        if ($fin = $request->input('fecha_fin')) {
+            $query->whereDate('created_at', '<=', $fin);
+        }
+        $local = $request->input('local');
+        if ($local !== null && $local !== '' && (int) $local !== 0) {
+            $query->where('users_id', (int) $local);
+        }
+        $traspasos = $query->orderByDesc('created_at')->get();
+
+        return response()->streamDownload(function () use ($traspasos) {
+            $out = fopen('php://output', 'w');
+            fputcsv($out, ['No. Requisición', 'Sucursal Origen', 'Sucursal Destino', 'Status', 'Piezas', 'Fecha']);
+            foreach ($traspasos as $t) {
+                fputcsv($out, [$t->no_requisicion, $t->sucursal_origen_id, $t->sucursal_destino_id, $t->status, $t->detalles->sum('cantidad_solicitada'), $t->created_at]);
+            }
+            fclose($out);
+        }, 'historial-traspasos.csv', ['Content-Type' => 'text/csv']);
     }
 }

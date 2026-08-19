@@ -270,4 +270,32 @@ class ComprasController extends Controller
 
         return response()->json(['ok' => true, 'compra' => $compra, 'producto' => $producto->fresh()]);
     }
+
+    /**
+     * Real route recovered from the live site's "Historial Compras" modal
+     * (form action="/getReporteCompras", fields fecha_inicio/fecha_fin) — was declared
+     * in the rescued HTML but never implemented (flagged as unconfirmed in an earlier
+     * pass; the owner has now confirmed the button 404s). Compras live in the shared
+     * `traspasos` table with `proveedor_id` set (see class docblock).
+     */
+    public function reporteCompras(Request $request)
+    {
+        $query = Traspaso::whereNotNull('proveedor_id')->with('proveedor');
+        if ($inicio = $request->input('fecha_inicio')) {
+            $query->whereDate('created_at', '>=', $inicio);
+        }
+        if ($fin = $request->input('fecha_fin')) {
+            $query->whereDate('created_at', '<=', $fin);
+        }
+        $compras = $query->orderByDesc('created_at')->get();
+
+        return response()->streamDownload(function () use ($compras) {
+            $out = fopen('php://output', 'w');
+            fputcsv($out, ['No. Requisición', 'Proveedor', 'Status', 'Efectivo', 'Transferencia', 'Tarjeta', 'Fecha']);
+            foreach ($compras as $c) {
+                fputcsv($out, [$c->no_requisicion, $c->proveedor->nombre ?? '', $c->status, $c->efectivo, $c->transferencia, $c->tarjeta, $c->created_at]);
+            }
+            fclose($out);
+        }, 'historial-compras.csv', ['Content-Type' => 'text/csv']);
+    }
 }

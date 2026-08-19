@@ -73,7 +73,10 @@ class Phase3bTest extends TestCase
         $this->assertEquals(40, $producto->fresh()->stock);
         $this->assertDatabaseHas('traspasos', ['id' => $traspasoId, 'status' => 2]);
 
-        // 4. Ingresar (increments stock back — net zero across the shared pool, as documented)
+        // 4. Ingresar. Origin and destino are both locales_id=1 here (default for a
+        // user/producto that don't set one), so crediting destino's matching-clave row
+        // lands back on this same row — see test_traspaso_moves_stock_between_different_locales
+        // below for the real cross-local case.
         $ingresar = $this->actingAs($user)->post('/ingresarMovimientoMercanciaDetalles', ['id' => $traspasoId]);
         $ingresar->assertStatus(200)->assertJson(['status' => true]);
         $this->assertEquals(50, $producto->fresh()->stock);
@@ -82,6 +85,37 @@ class Phase3bTest extends TestCase
         // now appears in "surtidas"
         $surtidas2 = $this->actingAs($user)->post('/getRequisicionesSurtidas')->json('requisiciones');
         $this->assertTrue(collect($surtidas2)->contains('id', $traspasoId));
+    }
+
+    public function test_traspaso_moves_stock_between_different_locales(): void
+    {
+        // Real system: each local (Bodega Principal + one per vendedor) has its own
+        // independent producto row/stock per clave — confirmed live. A traspaso must
+        // decrement the origin's row and credit the destino's own row for that same
+        // clave, creating it if the destino never had that product before.
+        $vendedor = User::create(['name' => 'Vendedor Test', 'email' => uniqid().'@t.mx', 'password' => 'x', 'type' => 'Vendedor', 'status' => 1, 'locales_id' => 2]);
+        $bodega = Auditoria::create(['id' => 1, 'nombre' => 'Bodega Principal', 'status' => 1]);
+        Auditoria::create(['id' => 2, 'nombre' => 'Local Vendedor', 'status' => 1]);
+        $productoOrigen = Producto::create(['locales_id' => 1, 'clave' => 'XCL1', 'descripcion' => 'Producto cruzado', 'precio_1' => 100, 'stock' => 30, 'status' => 1]);
+
+        $this->assertDatabaseMissing('productos', ['locales_id' => 2, 'clave' => 'XCL1']);
+
+        $crear = $this->actingAs($vendedor)->post('/crearSolicitud', [
+            'sucursal_id' => $bodega->id,
+            'productos' => json_encode([['id' => $productoOrigen->id, 'cantidad' => 5]]),
+        ]);
+        $traspasoId = $crear->json('requisicion.id');
+        $this->assertDatabaseHas('traspasos', ['id' => $traspasoId, 'sucursal_origen_id' => 1, 'sucursal_destino_id' => 2]);
+
+        $this->actingAs($vendedor)->post('/autorizarTraspaso', ['id' => $traspasoId]);
+        $this->actingAs($vendedor)->post('/enviarMovimientoMercancia', ['id' => $traspasoId]);
+        $this->assertEquals(25, $productoOrigen->fresh()->stock);
+
+        $this->actingAs($vendedor)->post('/ingresarMovimientoMercanciaDetalles', ['id' => $traspasoId]);
+
+        // Origin stays decremented — the vendedor's own new row got credited instead.
+        $this->assertEquals(25, $productoOrigen->fresh()->stock);
+        $this->assertDatabaseHas('productos', ['locales_id' => 2, 'clave' => 'XCL1', 'stock' => 5]);
     }
 
     public function test_rechazar_and_eliminar(): void
